@@ -1,0 +1,655 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Network Connections Monitor</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --card: #fff;
+      --text: #1d2330;
+      --muted: #667085;
+      --line: #e2e5ea;
+      --c1: #2f7fd1;
+      --c2: #e0902b;
+      --c3: #8a6fd1;
+      --add: #1c8f4e;
+      --rem: #c63d3d;
+      --chg: #b8860b
+    }
+
+    @media (prefers-color-scheme:dark) {
+      :root {
+        --bg: #14171d;
+        --card: #1d222b;
+        --text: #e7eaf0;
+        --muted: #98a2b3;
+        --line: #2c3340;
+        --c1: #5aa2ec;
+        --c2: #f0a94a;
+        --c3: #a48ce6;
+        --add: #4cc283;
+        --rem: #ef7373;
+        --chg: #e3b341
+      }
+    }
+
+    * {
+      box-sizing: border-box
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.45 system-ui, Segoe UI, sans-serif
+    }
+
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--line);
+      background: var(--card)
+    }
+
+    h1 {
+      font-size: 18px;
+      margin: 0
+    }
+
+    .meta {
+      color: var(--muted);
+      font-size: 12px
+    }
+
+    button,
+    select,
+    input {
+      font: inherit;
+      color: var(--text);
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 6px 10px
+    }
+
+    button {
+      cursor: pointer
+    }
+
+    button.primary {
+      background: var(--c1);
+      border-color: var(--c1);
+      color: #fff
+    }
+
+    main {
+      padding: 16px 20px;
+      max-width: 1300px;
+      margin: auto
+    }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 10px;
+      margin-bottom: 16px
+    }
+
+    .card,
+    .panel {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px 14px
+    }
+
+    .card .v {
+      font-size: 24px;
+      font-weight: 600
+    }
+
+    .card .l {
+      color: var(--muted);
+      font-size: 12px
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px
+    }
+
+    h2 {
+      font-size: 14px;
+      margin: 0 0 10px
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 150px 1fr 48px;
+      gap: 8px;
+      align-items: center;
+      margin: 4px 0
+    }
+
+    .row .n {
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap
+    }
+
+    .bar {
+      display: flex;
+      height: 16px;
+      background: var(--bg);
+      border-radius: 3px;
+      overflow: hidden
+    }
+
+    .bar span {
+      display: block;
+      height: 100%
+    }
+
+    .legend {
+      display: flex;
+      gap: 12px;
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 6px;
+      flex-wrap: wrap
+    }
+
+    .dot {
+      display: inline-block;
+      width: 10px;
+      height: 10px;
+      border-radius: 2px;
+      margin-right: 4px
+    }
+
+    .tabs {
+      display: flex;
+      gap: 6px;
+      margin-bottom: 10px;
+      flex-wrap: wrap;
+      align-items: center
+    }
+
+    .tabs button.on {
+      background: var(--c1);
+      color: #fff;
+      border-color: var(--c1)
+    }
+
+    .scroll {
+      overflow: auto;
+      max-height: 420px;
+      border: 1px solid var(--line);
+      border-radius: 6px
+    }
+
+    table {
+      border-collapse: collapse;
+      width: 100%;
+      font-size: 13px
+    }
+
+    th,
+    td {
+      text-align: left;
+      padding: 5px 10px;
+      border-bottom: 1px solid var(--line);
+      white-space: nowrap
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      background: var(--card);
+      cursor: pointer
+    }
+
+    .add {
+      color: var(--add)
+    }
+
+    .rem {
+      color: var(--rem)
+    }
+
+    .chg {
+      color: var(--chg)
+    }
+
+    .err {
+      background: var(--rem);
+      color: #fff;
+      padding: 8px 14px;
+      display: none
+    }
+
+    .muted {
+      color: var(--muted)
+    }
+
+    nav.views { display: flex; gap: 6px }
+    nav.views button.on { background: var(--c1); border-color: var(--c1); color: #fff }
+    .grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; margin-top: 10px }
+    .ev h3 { font-size: 13px; margin: 0 0 4px }
+    .ev ul { list-style: none; margin: 0; padding: 0; font-size: 12px; max-height: 190px; overflow: auto }
+    .ev li { padding: 2px 0; border-bottom: 1px solid var(--line); white-space: nowrap; overflow: hidden; text-overflow: ellipsis }
+    .chartwrap { overflow-x: auto }
+    .chartwrap svg { display: block }
+    .chartwrap text { fill: var(--muted); font-size: 10px }
+    .chartwrap line.grid { stroke: var(--line) }
+    .heat { border-collapse: separate; border-spacing: 0; font-size: 12px; width: auto }
+    .heat th, .heat td { padding: 0; border-bottom: 1px solid var(--line); cursor: default }
+    .heat th.col { cursor: pointer; padding: 4px 0; text-align: center; min-width: 22px; width: 22px }
+    .heat th.col .vt { writing-mode: vertical-rl; transform: rotate(180deg); white-space: nowrap; margin: auto; font-weight: 500; color: var(--muted) }
+    .heat th.corner { left: 0; z-index: 4; padding: 6px 8px; min-width: 330px; cursor: default }
+    .heat td.lab { position: sticky; left: 0; z-index: 2; background: var(--card); padding: 2px 8px; min-width: 330px; max-width: 330px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; border-right: 1px solid var(--line) }
+    .heat td.cell { min-width: 22px; width: 22px; height: 20px; border-left: 1px solid var(--line) }
+    .heat td.cell.t { box-shadow: inset 3px 0 0 var(--text) }
+    .heat td.sel, .heat th.sel { box-shadow: inset 2px 0 0 var(--c1), inset -2px 0 0 var(--c1) }
+    .heat td.cell.none { background: transparent }
+    .scroll.tall { max-height: 560px }
+    .swatches { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: var(--muted); margin: 6px 0 }
+    .swatches i { display: inline-block; width: 11px; height: 11px; border-radius: 2px; margin-right: 4px; vertical-align: -1px }
+    .filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px }
+    .filters label { font-size: 12px; color: var(--muted); display: flex; gap: 4px; align-items: center }
+    [hidden] { display: none !important }
+  </style>
+</head>
+
+<body>
+  <div class="err" id="err"></div>
+  <header>
+    <div>
+      <h1>Active Network Connections Monitor</h1>
+      <div class="meta" id="meta">Loading…</div>
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+      <nav class="views"><button data-view="snap" class="on">Snapshot</button><button data-view="time">Timeline</button></nav>
+      <label class="meta">Auto-refresh
+        <select id="auto">
+          <option value="0">off</option>
+          <option value="2">2 s</option>
+          <option value="5">5 s</option>
+          <option value="10">10 s</option>
+        </select>
+      </label>
+      <button class="primary" id="take">Take new snapshot</button>
+    </div>
+  </header>
+  <main>
+  <section id="v-snap">
+    <div class="cards" id="cards"></div>
+    <div class="grid">
+      <div class="panel">
+        <h2>Top processes (by name)</h2>
+        <div class="legend"><span><i class="dot" style="background:var(--c1)"></i>TCP connection</span><span><i
+              class="dot" style="background:var(--c2)"></i>TCP LISTEN</span><span><i class="dot"
+              style="background:var(--c3)"></i>UDP endpoint</span></div>
+        <div id="procs"></div>
+        <div class="meta" style="margin-top:8px">Number in the right column = distinct PIDs sharing that name.</div>
+      </div>
+      <div class="panel">
+        <h2>TCP state distribution</h2>
+        <div id="states"></div>
+      </div>
+    </div>
+    <div class="panel">
+      <div class="tabs">
+        <button data-tab="conns" class="on">Connections</button>
+        <button data-tab="added">Added</button>
+        <button data-tab="removed">Removed</button>
+        <button data-tab="changed">State changes</button>
+        <input id="q" placeholder="Filter text…" style="margin-left:auto">
+        <select id="proto">
+          <option value="">All protocols</option>
+          <option>TCP</option>
+          <option>UDP</option>
+        </select>
+      </div>
+      <div class="scroll">
+        <table>
+          <thead id="thead"></thead>
+          <tbody id="tbody"></tbody>
+        </table>
+      </div>
+      <div class="meta" id="tinfo" style="margin-top:6px"></div>
+    </div>
+  </section>
+
+  <section id="v-time" hidden>
+    <div class="cards" id="tcards"></div>
+
+    <div class="panel" style="margin-bottom:12px">
+      <div class="tabs">
+        <h2 style="margin:0">Playback</h2>
+        <button id="tprev" title="Previous snapshot">◀</button>
+        <button id="tplay">▶ Play</button>
+        <button id="tnext" title="Next snapshot">▶</button>
+        <input type="range" id="tslider" min="0" max="0" value="0" style="flex:1;min-width:180px;padding:0">
+        <label class="meta">Show last
+          <select id="tlast"><option>10</option><option>20</option><option selected>40</option><option>80</option><option>200</option></select> snapshots
+        </label>
+      </div>
+      <div class="meta" id="tcur" style="margin-bottom:4px"></div>
+      <button id="topen">Open full details of this snapshot</button>
+      <div class="grid3" id="tevents"></div>
+    </div>
+
+    <div class="grid">
+      <div class="panel">
+        <h2>TCP state counts over time</h2>
+        <div class="swatches" id="tlegend"></div>
+        <div class="chartwrap" id="tchart"></div>
+      </div>
+      <div class="panel">
+        <h2>Churn between snapshots</h2>
+        <div class="swatches"><span><i style="background:var(--add)"></i>new</span><span><i style="background:var(--rem)"></i>gone</span><span><i style="background:var(--chg)"></i>state changed</span></div>
+        <div class="chartwrap" id="tchurn"></div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2>Connection life lines <span class="muted" style="font-weight:400">— one row per TCP connection, one column per snapshot (left = oldest)</span></h2>
+      <div class="swatches" id="hlegend"></div>
+      <div class="filters">
+        <input id="hq" placeholder="Filter process / address…">
+        <select id="hstate"><option value="">Any state</option></select>
+        <label><input type="checkbox" id="hlisten" checked> hide listeners</label>
+        <label><input type="checkbox" id="hchg"> only connections that changed, appeared or disappeared</label>
+      </div>
+      <div class="scroll tall"><table class="heat"><thead id="hhead"></thead><tbody id="hbody"></tbody></table></div>
+      <div class="meta" id="hinfo" style="margin-top:6px"></div>
+      <div class="meta">A thick dark edge on a cell marks the snapshot where that connection appeared or changed state. Click a column header to jump the playback there.</div>
+    </div>
+  </section>
+  </main>
+  <script>
+    let data = null, tab = "conns", sortKey = null, sortDir = 1, timer = null;
+    const $ = id => document.getElementById(id);
+    function el(tag, props, ...kids) {
+      const e = document.createElement(tag);
+      if (props) for (const k in props) { if (k === "class") e.className = props[k]; else if (k === "style") e.style.cssText = props[k]; else e[k] = props[k]; }
+      kids.forEach(k => e.append(k)); return e;
+    }
+    function showErr(m) { const e = $("err"); e.textContent = m; e.style.display = m ? "block" : "none"; }
+
+    async function load(take, id) {
+      try {
+        showErr("");
+        const r = await fetch("/api/data" + (take ? "?take=1" : id ? "?id=" + id : ""));
+        const j = await r.json();
+        if (!r.ok || j.error) { showErr(j.error || "Request failed"); return; }
+        data = j; render();
+      } catch (e) { showErr(String(e)); }
+    }
+
+    function render() {
+      if (!data || data.empty) { $("meta").textContent = "No snapshots yet. Click “Take new snapshot”."; return; }
+      const s = data.snapshot, p = data.previous;
+      $("meta").textContent = `Snapshot ${s.id} at ${s.timestamp}` + (p ? ` · compared with snapshot ${p.id}` : " · no previous snapshot to compare");
+      const c = data.counts, d = data.diff;
+      const cards = [["Total sockets", c.total], ["TCP", c.tcp], ["UDP", c.udp], ["Distinct PIDs", c.pids],
+      ["Added", d ? d.added_total : "–", "add"], ["Removed", d ? d.removed_total : "–", "rem"], ["State changes", d ? d.changed_total : "–", "chg"]];
+      $("cards").replaceChildren(...cards.map(([l, v, cls]) => el("div", { class: "card" }, el("div", { class: "v " + (cls || "") }, String(v)), el("div", { class: "l" }, l))));
+
+      const max = Math.max(1, ...data.processes.map(p => p.tcp + p.listen + p.udp));
+      $("procs").replaceChildren(...data.processes.map(p => {
+        const seg = (n, col) => el("span", { style: `width:${n / max * 100}%;background:var(${col})`, title: String(n) });
+        return el("div", { class: "row" }, el("div", { class: "n", title: p.name }, p.name),
+          el("div", { class: "bar" }, seg(p.tcp, "--c1"), seg(p.listen, "--c2"), seg(p.udp, "--c3")),
+          el("div", { class: "muted" }, `${p.tcp + p.listen + p.udp} / ${p.pids}`));
+      }));
+
+      const st = Object.entries(data.states).sort((a, b) => b[1] - a[1]);
+      const smax = Math.max(1, ...st.map(x => x[1]));
+      $("states").replaceChildren(...st.map(([k, v]) => el("div", { class: "row" }, el("div", { class: "n" }, k),
+        el("div", { class: "bar" }, el("span", { style: `width:${v / smax * 100}%;background:var(--c1)` })), el("div", { class: "muted" }, String(v)))));
+      table();
+    }
+
+    const COLS = {
+      conns: [["protocol", "Proto"], ["local", "Local"], ["remote", "Remote"], ["state", "State"], ["pid", "PID"], ["process_name", "Process"]],
+      added: [["protocol", "Proto"], ["local", "Local"], ["remote", "Remote"], ["state", "State"], ["pid", "PID"], ["process", "Process"]],
+      removed: [["protocol", "Proto"], ["local", "Local"], ["remote", "Remote"], ["state", "Last state"], ["pid", "PID"], ["process", "Process"]],
+      changed: [["protocol", "Proto"], ["local", "Local"], ["remote", "Remote"], ["from", "From"], ["to", "To"], ["pid", "PID"], ["process", "Process"]]
+    };
+
+    function table() {
+      if (!data || data.empty) return;
+      let rows;
+      if (tab === "conns") rows = data.connections.map(c => ({ ...c, local: c.local, remote: c.protocol === "UDP" ? "*" : c.remote }));
+      else rows = (data.diff && data.diff[tab]) || [];
+      const q = $("q").value.toLowerCase(), pr = $("proto").value;
+      rows = rows.filter(r => (!pr || r.protocol === pr) && (!q || Object.values(r).join(" ").toLowerCase().includes(q)));
+      if (sortKey) rows.sort((a, b) => (a[sortKey] > b[sortKey] ? 1 : a[sortKey] < b[sortKey] ? -1 : 0) * sortDir);
+      const cols = COLS[tab];
+      $("thead").replaceChildren(el("tr", null, ...cols.map(([k, l]) => {
+        const th = el("th", null, l + (sortKey === k ? (sortDir > 0 ? " ▲" : " ▼") : ""));
+        th.onclick = () => { sortDir = sortKey === k ? -sortDir : 1; sortKey = k; table(); }; return th;
+      })));
+      const cls = { added: "add", removed: "rem", changed: "chg" }[tab] || "";
+      $("tbody").replaceChildren(...rows.slice(0, 1000).map(r => el("tr", { class: cls }, ...cols.map(([k]) => el("td", null, String(r[k]))))));
+      $("tinfo").textContent = `Showing ${Math.min(rows.length, 1000)} of ${rows.length} rows` + (tab !== "conns" && !data.diff ? " (take a second snapshot to see differences)" : "");
+    }
+
+    document.querySelectorAll(".tabs button[data-tab]").forEach(b => b.onclick = () => {
+      document.querySelectorAll(".tabs button[data-tab]").forEach(x => x.classList.remove("on"));
+      b.classList.add("on"); tab = b.dataset.tab; sortKey = null; table();
+    });
+
+    // ======================= Timeline view =======================
+    let view = "snap", tdata = null, tsel = 0, tplayer = null;
+    const SC = { LISTEN: "#8da2c0", SYN_SENT: "#f2c744", SYN_RECEIVED: "#f0a23a", ESTABLISHED: "#3fb76f",
+      FIN_WAIT_1: "#e8833a", FIN_WAIT_2: "#d9622b", CLOSE_WAIT: "#d84a4a", CLOSING: "#b5446e",
+      LAST_ACK: "#a23b8f", TIME_WAIT: "#8a6fd1", CLOSED: "#6b7280", DELETE_TCB: "#4b5563", UNKNOWN: "#ff2d55" };
+    const col = s => SC[s] || "#999";
+    const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    const hhmmss = ts => ts.slice(11);
+
+    function refresh(take) { return view === "snap" ? load(take) : loadTimeline(take); }
+
+    function setView(v) {
+      view = v;
+      $("v-snap").hidden = v !== "snap"; $("v-time").hidden = v !== "time";
+      document.querySelectorAll("nav.views button").forEach(b => b.classList.toggle("on", b.dataset.view === v));
+      stopPlay();
+      refresh(false);
+    }
+    document.querySelectorAll("nav.views button").forEach(b => b.onclick = () => setView(b.dataset.view));
+
+    async function openSnapshot(id) { await load(false, id); setView("snap"); }
+
+    async function loadTimeline(take) {
+      try {
+        showErr("");
+        if (take) {
+          const r0 = await fetch("/api/data?take=1"), j0 = await r0.json();
+          if (!r0.ok || j0.error) { showErr(j0.error || "Snapshot failed"); return; }
+          data = j0;
+        }
+        const r = await fetch("/api/timeline?last=" + $("tlast").value), j = await r.json();
+        if (!r.ok || j.error) { showErr(j.error || "Request failed"); return; }
+        const prevId = tdata && !tdata.empty ? tdata.snapshots[tsel]?.id : null;
+        const wasLast = tdata && !tdata.empty && tsel === tdata.snapshots.length - 1;
+        tdata = j;
+        if (!j.empty) {
+          const at = j.snapshots.findIndex(s => s.id === prevId);
+          tsel = (wasLast || at < 0) ? j.snapshots.length - 1 : at;
+        }
+        renderTimeline();
+      } catch (e) { showErr(String(e)); }
+    }
+
+    function renderTimeline() {
+      if (!tdata || tdata.empty) {
+        $("meta").textContent = "No snapshots yet. Click “Take new snapshot”.";
+        $("tcards").replaceChildren(); return;
+      }
+      const sn = tdata.snapshots, n = sn.length;
+      $("meta").textContent = `Timeline of ${n} snapshot(s): #${sn[0].id} (${sn[0].timestamp}) → #${sn[n - 1].id} (${sn[n - 1].timestamp})`;
+      const rows = tdata.rows;
+      const cards = [["Snapshots shown", n], ["TCP connections tracked", tdata.total_rows],
+        ["Changed state", rows.filter(r => r.changes > 0).length, "chg"],
+        ["Appeared / disappeared", rows.filter(r => !r.present_all).length, "add"]];
+      $("tcards").replaceChildren(...cards.map(([l, v, c]) => el("div", { class: "card" }, el("div", { class: "v " + (c || "") }, String(v)), el("div", { class: "l" }, l))));
+
+      $("tslider").max = n - 1; $("tslider").value = tsel;
+      const swatch = s => `<span><i style="background:${col(s)}"></i>${s}</span>`;
+      $("tlegend").innerHTML = tdata.states.map(swatch).join("");
+      $("hlegend").innerHTML = tdata.states.map(swatch).join("");
+      const cur = $("hstate").value;
+      $("hstate").innerHTML = '<option value="">Any state</option>' + tdata.states.map(s => `<option${s === cur ? " selected" : ""}>${s}</option>`).join("");
+
+      stateChart(); churnChart(); heat(); playbackInfo();
+    }
+
+    function stateChart() {
+      const sn = tdata.snapshots, n = sn.length, step = 28, L = 34, B = 44, H = 210, W = Math.max(420, n * step + L + 10);
+      const max = Math.max(1, ...sn.map(s => s.total)), ph = H - B - 10;
+      let g = "";
+      for (let i = 0; i <= 4; i++) {
+        const y = 10 + ph - ph * i / 4;
+        g += `<line class="grid" x1="${L}" x2="${W}" y1="${y}" y2="${y}"/><text x="${L - 4}" y="${y + 3}" text-anchor="end">${Math.round(max * i / 4)}</text>`;
+      }
+      const every = Math.ceil(n / Math.max(1, Math.floor((W - L) / 70)));
+      sn.forEach((s, j) => {
+        const x = L + j * step + 3; let y = 10 + ph;
+        tdata.states.forEach(st => {
+          const v = s.counts[st] || 0; if (!v) return;
+          const h = ph * v / max; y -= h;
+          g += `<rect x="${x}" y="${y}" width="${step - 6}" height="${h}" fill="${col(st)}"><title>#${s.id} ${s.timestamp}\n${st}: ${v}</title></rect>`;
+        });
+        if (j % every === 0 || j === n - 1) g += `<text transform="translate(${x + 8},${H - B + 12}) rotate(60)">${hhmmss(s.timestamp)}</text>`;
+        if (j === tsel) g += `<rect x="${x - 2}" y="6" width="${step - 2}" height="${ph + 6}" fill="none" stroke="var(--c1)" stroke-width="2"/>`;
+      });
+      $("tchart").innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${g}</svg>`;
+    }
+
+    function churnChart() {
+      const sn = tdata.snapshots, n = sn.length, step = 28, L = 34, B = 44, H = 210, W = Math.max(420, n * step + L + 10);
+      const max = Math.max(1, ...sn.map(s => Math.max(s.added || 0, s.removed || 0, s.changed || 0))), ph = H - B - 10;
+      let g = "";
+      for (let i = 0; i <= 4; i++) {
+        const y = 10 + ph - ph * i / 4;
+        g += `<line class="grid" x1="${L}" x2="${W}" y1="${y}" y2="${y}"/><text x="${L - 4}" y="${y + 3}" text-anchor="end">${Math.round(max * i / 4)}</text>`;
+      }
+      const every = Math.ceil(n / Math.max(1, Math.floor((W - L) / 70)));
+      sn.forEach((s, j) => {
+        const x = L + j * step + 2;
+        [["added", "--add"], ["removed", "--rem"], ["changed", "--chg"]].forEach(([k, c], m) => {
+          const v = s[k]; if (!v) return;
+          const h = ph * v / max;
+          g += `<rect x="${x + m * 7}" y="${10 + ph - h}" width="6" height="${h}" fill="var(${c})"><title>#${s.id} ${s.timestamp}\n${k}: ${v}</title></rect>`;
+        });
+        if (j % every === 0 || j === n - 1) g += `<text transform="translate(${x + 8},${H - B + 12}) rotate(60)">${hhmmss(s.timestamp)}</text>`;
+        if (j === tsel) g += `<rect x="${x - 2}" y="6" width="${step - 2}" height="${ph + 6}" fill="none" stroke="var(--c1)" stroke-width="2"/>`;
+      });
+      $("tchurn").innerHTML = `<svg width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">${g}</svg>`;
+    }
+
+    const HEAT_MAX_ROWS = 400;
+    function heat() {
+      if (!tdata || tdata.empty) return;
+      const sn = tdata.snapshots, st = tdata.states;
+      const q = $("hq").value.toLowerCase(), sf = $("hstate").value, hideL = $("hlisten").checked, onlyC = $("hchg").checked;
+      const si = sf ? st.indexOf(sf) : -2;
+      const rows = tdata.rows.filter(r => (!hideL || !r.listener) && (!onlyC || r.changes > 0 || !r.present_all)
+        && (!sf || r.cells.includes(si)) && (!q || `${r.process} ${r.pid} ${r.local} ${r.remote}`.toLowerCase().includes(q)));
+      const shown = rows.slice(0, HEAT_MAX_ROWS);
+
+      $("hhead").innerHTML = "<tr><th class='corner'>Connection (process · PID · local → remote)</th>" +
+        sn.map((s, j) => `<th class="col" data-c="${j}" title="Snapshot #${s.id} · ${esc(s.timestamp)}${s.label ? " · " + esc(s.label) : ""}"><div class="vt">${hhmmss(s.timestamp)}${s.label ? " ●" : ""}</div></th>`).join("") + "</tr>";
+
+      $("hbody").innerHTML = shown.map(r => {
+        const label = `${r.process} (${r.pid})  ${r.local} → ${r.remote}`;
+        let prev = -1, tds = "";
+        r.cells.forEach((c, j) => {
+          if (c < 0) { tds += `<td class="cell none" data-c="${j}"></td>`; prev = -1; return; }
+          const s = st[c], tr = (prev !== c) && j > 0 ? " t" : "";
+          tds += `<td class="cell${tr}" data-c="${j}" style="background:${col(s)}" title="${s} · #${sn[j].id} ${esc(sn[j].timestamp)}"></td>`;
+          prev = c;
+        });
+        return `<tr><td class="lab" title="${esc(label)}"><b>${esc(r.process)}</b> <span class="muted">(${r.pid})</span> ${esc(r.local)} → ${esc(r.remote)}</td>${tds}</tr>`;
+      }).join("");
+
+      $("hinfo").textContent = `Showing ${shown.length} of ${rows.length} matching rows` +
+        (tdata.truncated ? ` · the server sent the ${tdata.rows.length} most interesting of ${tdata.total_rows} connections` : "") +
+        (sn.length < 2 ? " · take a second snapshot to see change over time" : "");
+      markSel();
+    }
+
+    function markSel() {
+      document.querySelectorAll("#v-time .sel").forEach(e => e.classList.remove("sel"));
+      document.querySelectorAll(`.heat [data-c="${tsel}"]`).forEach(e => e.classList.add("sel"));
+    }
+
+    function eventsAt(j) {
+      const out = { added: [], removed: [], changed: [] };
+      if (j <= 0) return out;
+      const st = tdata.states;
+      tdata.rows.forEach(r => {
+        const a = r.cells[j - 1], b = r.cells[j];
+        const name = `${r.process} · ${r.local} → ${r.remote}`;
+        if (a < 0 && b >= 0) out.added.push(`${name}  [${st[b]}]`);
+        else if (a >= 0 && b < 0) out.removed.push(`${name}  [was ${st[a]}]`);
+        else if (a >= 0 && b >= 0 && a !== b) out.changed.push(`${name}  ${st[a]} → ${st[b]}`);
+      });
+      return out;
+    }
+
+    function playbackInfo() {
+      const s = tdata.snapshots[tsel], ev = eventsAt(tsel);
+      $("tcur").textContent = `Snapshot #${s.id} · ${s.timestamp}` + (s.label ? ` · “${s.label}”` : "") + ` · ${s.total} TCP connections`
+        + (tsel === 0 ? " · first snapshot in this window (nothing to compare with)" : "");
+      const block = (title, cls, items) => `<div class="ev"><h3 class="${cls}">${title} (${items.length})</h3><ul>` +
+        (items.slice(0, 40).map(t => `<li class="${cls}" title="${esc(t)}">${esc(t)}</li>`).join("") || '<li class="muted">none</li>') +
+        (items.length > 40 ? `<li class="muted">… +${items.length - 40} more</li>` : "") + "</ul></div>";
+      $("tevents").innerHTML = block("New connections", "add", ev.added) + block("Gone connections", "rem", ev.removed) + block("State changes", "chg", ev.changed);
+      $("tslider").value = tsel;
+    }
+
+    function selectSnapshot(j) {
+      if (!tdata || tdata.empty) return;
+      tsel = Math.max(0, Math.min(j, tdata.snapshots.length - 1));
+      markSel(); playbackInfo(); stateChart(); churnChart();
+    }
+
+    function stopPlay() { if (tplayer) { clearInterval(tplayer); tplayer = null; } $("tplay").textContent = "▶ Play"; }
+    $("tplay").onclick = () => {
+      if (tplayer) return stopPlay();
+      if (!tdata || tdata.empty) return;
+      if (tsel >= tdata.snapshots.length - 1) selectSnapshot(0);
+      $("tplay").textContent = "⏸ Pause";
+      tplayer = setInterval(() => { if (tsel >= tdata.snapshots.length - 1) return stopPlay(); selectSnapshot(tsel + 1); }, 800);
+    };
+    $("tprev").onclick = () => { stopPlay(); selectSnapshot(tsel - 1); };
+    $("tnext").onclick = () => { stopPlay(); selectSnapshot(tsel + 1); };
+    $("tslider").oninput = e => { stopPlay(); selectSnapshot(+e.target.value); };
+    $("topen").onclick = () => { if (tdata && !tdata.empty) openSnapshot(tdata.snapshots[tsel].id); };
+    $("tlast").onchange = () => loadTimeline(false);
+    $("hq").oninput = heat; $("hstate").onchange = heat; $("hlisten").onchange = heat; $("hchg").onchange = heat;
+    $("hhead").onclick = e => { const t = e.target.closest("[data-c]"); if (t) { stopPlay(); selectSnapshot(+t.dataset.c); } };
+    $("hbody").onclick = e => { const t = e.target.closest("td.cell"); if (t) { stopPlay(); selectSnapshot(+t.dataset.c); } };
+
+    $("q").oninput = table; $("proto").onchange = table;
+    $("take").onclick = () => refresh(true);
+    $("auto").onchange = e => { clearInterval(timer); const s = +e.target.value; if (s) timer = setInterval(() => refresh(true), s * 1000); };
+    refresh(false);
+  </script>
+</body>
+
+</html>

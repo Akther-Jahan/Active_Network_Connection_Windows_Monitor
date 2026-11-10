@@ -1,209 +1,84 @@
 # ==========================================
 # udp_table.py
-# Part 1
+# IPv4 + IPv6 UDP tables via GetExtendedUdpTable
+# UDP rows have NO remote endpoint and NO state (connectionless).
 # ==========================================
 
 import ctypes
-import socket
-import struct
-
+import sys
 from ctypes import wintypes
 
+from common import DWORD, AF_INET, AF_INET6, fetch_table, decode_ip, decode_ipv6, decode_port
 from models import Connection
-
-
-# ------------------------------------------
-# Windows DLL
-# ------------------------------------------
-
-iphlpapi = ctypes.WinDLL("iphlpapi.dll")
-
-AF_INET = 2
 
 UDP_TABLE_OWNER_PID = 1
 
-NO_ERROR = 0
 
-ERROR_INSUFFICIENT_BUFFER = 122
-
-
-# ------------------------------------------
-# MIB_UDPROW_OWNER_PID
-# ------------------------------------------
-
-class MIB_UDPROW_OWNER_PID(ctypes.Structure):
-
+class MIB_UDPROW_OWNER_PID(ctypes.Structure):          # 12 bytes
     _fields_ = [
-
-        ("dwLocalAddr", wintypes.DWORD),
-
-        ("dwLocalPort", wintypes.DWORD),
-
-        ("dwOwningPid", wintypes.DWORD)
-
+        ("dwLocalAddr", DWORD),
+        ("dwLocalPort", DWORD),
+        ("dwOwningPid", DWORD),
     ]
 
 
-# ------------------------------------------
-# UDP Table Header
-# ------------------------------------------
-
-class MIB_UDPTABLE_OWNER_PID(ctypes.Structure):
-
+class MIB_UDP6ROW_OWNER_PID(ctypes.Structure):         # 28 bytes
     _fields_ = [
-
-        ("dwNumEntries", wintypes.DWORD),
-
-        ("table", MIB_UDPROW_OWNER_PID * 1)
-
+        ("ucLocalAddr", ctypes.c_ubyte * 16),
+        ("dwLocalScopeId", DWORD),
+        ("dwLocalPort", DWORD),
+        ("dwOwningPid", DWORD),
     ]
 
 
-# ------------------------------------------
-# Declare Windows API
-# ------------------------------------------
+def _load():
+    if sys.platform != "win32":
+        return None
+    fn = ctypes.WinDLL("iphlpapi.dll").GetExtendedUdpTable
+    fn.argtypes = [ctypes.c_void_p, ctypes.POINTER(DWORD), wintypes.BOOL,
+                   DWORD, DWORD, DWORD]
+    fn.restype = DWORD
+    return fn
 
-GetExtendedUdpTable = iphlpapi.GetExtendedUdpTable
 
-GetExtendedUdpTable.argtypes = [
+GetExtendedUdpTable = _load()
 
-    ctypes.c_void_p,
-    ctypes.POINTER(wintypes.ULONG),
-    wintypes.BOOL,
-    wintypes.ULONG,
-    wintypes.ULONG,
-    wintypes.ULONG
 
-]
+def parse_udp4(buffer, count, process_map):
+    if count == 0:
+        return []
+    rows = (MIB_UDPROW_OWNER_PID * count).from_buffer(buffer, ctypes.sizeof(DWORD))
+    return [Connection(
+        protocol="UDP",
+        local_address=decode_ip(r.dwLocalAddr), local_port=decode_port(r.dwLocalPort),
+        remote_address="*", remote_port=0, state="NONE",
+        pid=r.dwOwningPid, process_name=process_map.get(r.dwOwningPid, "Unknown"),
+        ip_version=4) for r in rows]
 
-GetExtendedUdpTable.restype = wintypes.DWORD
 
-# ==========================================
-# udp_table.py
-# Part 2
-# ==========================================
+def parse_udp6(buffer, count, process_map):
+    if count == 0:
+        return []
+    rows = (MIB_UDP6ROW_OWNER_PID * count).from_buffer(buffer, ctypes.sizeof(DWORD))
+    return [Connection(
+        protocol="UDP",
+        local_address=decode_ipv6(r.ucLocalAddr, r.dwLocalScopeId),
+        local_port=decode_port(r.dwLocalPort),
+        remote_address="*", remote_port=0, state="NONE",
+        pid=r.dwOwningPid, process_name=process_map.get(r.dwOwningPid, "Unknown"),
+        ip_version=6) for r in rows]
+
 
 def get_udp_connections(process_map):
-
-    size = wintypes.ULONG(0)
-
-    # ------------------------------------------
-    # First Call
-    # Get Required Buffer Size
-    # ------------------------------------------
-
-    result = GetExtendedUdpTable(
-
-        None,
-        ctypes.byref(size),
-        False,
-        AF_INET,
-        UDP_TABLE_OWNER_PID,
-        0
-
-    )
-
-    if result != ERROR_INSUFFICIENT_BUFFER:
-        raise ctypes.WinError(result)
-
-    # ------------------------------------------
-    # Allocate Buffer
-    # ------------------------------------------
-
-    buffer = ctypes.create_string_buffer(size.value)
-
-    # ------------------------------------------
-    # Second Call
-    # Read UDP Table
-    # ------------------------------------------
-
-    result = GetExtendedUdpTable(
-
-        buffer,
-        ctypes.byref(size),
-        False,
-        AF_INET,
-        UDP_TABLE_OWNER_PID,
-        0
-
-    )
-
-    if result != NO_ERROR:
-        raise ctypes.WinError(result)
-
-    # ------------------------------------------
-    # Read Header
-    # ------------------------------------------
-
-    table = ctypes.cast(
-
-        buffer,
-
-        ctypes.POINTER(
-            MIB_UDPTABLE_OWNER_PID
-        )
-
-    ).contents
-
-    num_entries = table.dwNumEntries
-
-    # ------------------------------------------
-    # First Row Pointer
-    # ------------------------------------------
-
-    row_ptr = ctypes.cast(
-
-        ctypes.addressof(buffer)
-        + ctypes.sizeof(wintypes.DWORD),
-
-        ctypes.POINTER(
-            MIB_UDPROW_OWNER_PID
-        )
-
-    )
-
     connections = []
 
-    # ------------------------------------------
-    # Parse Every UDP Row
-    # ------------------------------------------
+    buffer, count = fetch_table(GetExtendedUdpTable, AF_INET, UDP_TABLE_OWNER_PID)
+    connections += parse_udp4(buffer, count, process_map)
 
-    for i in range(num_entries):
-
-        row = row_ptr[i]
-
-        local_ip = socket.inet_ntoa(
-            struct.pack("<L", row.dwLocalAddr)
-        )
-
-        local_port = socket.ntohs(
-            row.dwLocalPort & 0xFFFF
-        )
-
-        pid = row.dwOwningPid
-
-        process_name = process_map.get(
-            pid,
-            "Unknown"
-        )
-
-        conn = Connection(
-
-            protocol="UDP",
-
-            local_address=local_ip,
-            local_port=local_port,
-
-            remote_address="*",
-            remote_port=0,
-
-            state="NONE",
-
-            pid=pid,
-            process_name=process_name
-
-        )
-
-        connections.append(conn)
+    try:
+        buffer, count = fetch_table(GetExtendedUdpTable, AF_INET6, UDP_TABLE_OWNER_PID)
+        connections += parse_udp6(buffer, count, process_map)
+    except OSError as e:
+        print(f"[warn] IPv6 UDP table unavailable: {e}", file=sys.stderr)
 
     return connections

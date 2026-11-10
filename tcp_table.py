@@ -1,305 +1,125 @@
 # ==========================================
 # tcp_table.py
-# Part 1
+# IPv4 + IPv6 TCP tables via GetExtendedTcpTable
 # ==========================================
 
 import ctypes
-import socket
-import struct
-
+import sys
 from ctypes import wintypes
 
+from common import DWORD, AF_INET, AF_INET6, fetch_table, decode_ip, decode_ipv6, decode_port
 from models import Connection
 
+TCP_TABLE_OWNER_PID_LISTENER = 3      # listening sockets only (by definition)
+TCP_TABLE_OWNER_PID_CONNECTIONS = 4   # everything that is not a listener
+TCP_TABLE_OWNER_PID_ALL = 5           # kept for reference / --diagnose
 
-# ------------------------------------------
-# Windows DLL
-# ------------------------------------------
+# Some Windows builds (seen on Insider build 26300) put garbage such as 0, 1 or 6 into dwState
+# for LISTEN sockets in the ALL table; even the LISTENER table returns them. The table CLASS is
+# reliable, so rows from the LISTENER table are labelled LISTEN. This counts how often the raw
+# value disagreed, so the tool can say so instead of hiding it.
+LISTENER_RAW_ANOMALIES = 0
 
-iphlpapi = ctypes.WinDLL("iphlpapi.dll")
-
-AF_INET = 2
-
-TCP_TABLE_OWNER_PID_ALL = 5
-
-NO_ERROR = 0
-
-ERROR_INSUFFICIENT_BUFFER = 122
-
-
-# ------------------------------------------
-# TCP STATE MAP
-# ------------------------------------------
-
+# MIB_TCP_STATE values from the Windows headers
 TCP_STATES = {
-
-    1: "CLOSED",
-    2: "LISTEN",
-    3: "SYN_SENT",
-    4: "SYN_RECEIVED",
-    5: "ESTABLISHED",
-    6: "FIN_WAIT_1",
-    7: "FIN_WAIT_2",
-    8: "CLOSE_WAIT",
-    9: "CLOSING",
-    10: "LAST_ACK",
-    11: "TIME_WAIT",
-    12: "DELETE_TCB"
-
+    1: "CLOSED", 2: "LISTEN", 3: "SYN_SENT", 4: "SYN_RECEIVED",
+    5: "ESTABLISHED", 6: "FIN_WAIT_1", 7: "FIN_WAIT_2", 8: "CLOSE_WAIT",
+    9: "CLOSING", 10: "LAST_ACK", 11: "TIME_WAIT", 12: "DELETE_TCB",
 }
 
 
-# ------------------------------------------
-# MIB_TCPROW_OWNER_PID
-# ------------------------------------------
-
-class MIB_TCPROW_OWNER_PID(ctypes.Structure):
-
+class MIB_TCPROW_OWNER_PID(ctypes.Structure):          # 24 bytes
     _fields_ = [
-
-        ("dwState", wintypes.DWORD),
-
-        ("dwLocalAddr", wintypes.DWORD),
-
-        ("dwLocalPort", wintypes.DWORD),
-
-        ("dwRemoteAddr", wintypes.DWORD),
-
-        ("dwRemotePort", wintypes.DWORD),
-
-        ("dwOwningPid", wintypes.DWORD)
-
+        ("dwState", DWORD),
+        ("dwLocalAddr", DWORD),
+        ("dwLocalPort", DWORD),
+        ("dwRemoteAddr", DWORD),
+        ("dwRemotePort", DWORD),
+        ("dwOwningPid", DWORD),
     ]
 
 
-# ------------------------------------------
-# Dynamic Table Header
-# ------------------------------------------
-
-class MIB_TCPTABLE_OWNER_PID(ctypes.Structure):
-
+class MIB_TCP6ROW_OWNER_PID(ctypes.Structure):         # 56 bytes
     _fields_ = [
-
-        ("dwNumEntries", wintypes.DWORD),
-
-        ("table", MIB_TCPROW_OWNER_PID * 1)
-
+        ("ucLocalAddr", ctypes.c_ubyte * 16),
+        ("dwLocalScopeId", DWORD),
+        ("dwLocalPort", DWORD),
+        ("ucRemoteAddr", ctypes.c_ubyte * 16),
+        ("dwRemoteScopeId", DWORD),
+        ("dwRemotePort", DWORD),
+        ("dwState", DWORD),
+        ("dwOwningPid", DWORD),
     ]
 
 
-# ------------------------------------------
-# Declare Windows API
-# ------------------------------------------
+def _load():
+    if sys.platform != "win32":
+        return None
+    fn = ctypes.WinDLL("iphlpapi.dll").GetExtendedTcpTable
+    fn.argtypes = [ctypes.c_void_p, ctypes.POINTER(DWORD), wintypes.BOOL,
+                   DWORD, DWORD, DWORD]
+    fn.restype = DWORD
+    return fn
 
-GetExtendedTcpTable = iphlpapi.GetExtendedTcpTable
 
-GetExtendedTcpTable.argtypes = [
+GetExtendedTcpTable = _load()
 
-    ctypes.c_void_p,
-    ctypes.POINTER(wintypes.ULONG),
-    wintypes.BOOL,
-    wintypes.ULONG,
-    wintypes.ULONG,
-    wintypes.ULONG
 
-]
+def _state(raw, force_state):
+    """Raw dwState -> name. force_state is set for rows of the LISTENER table."""
+    global LISTENER_RAW_ANOMALIES
+    if force_state:
+        if raw != 2:
+            LISTENER_RAW_ANOMALIES += 1
+        return force_state
+    return TCP_STATES.get(raw, "UNKNOWN")
 
-GetExtendedTcpTable.restype = wintypes.DWORD
 
-# ==========================================
-# tcp_table.py
-# Part 2
-# ==========================================
+def parse_tcp4(buffer, count, process_map, force_state=None):
+    """Turn a MIB_TCPTABLE_OWNER_PID buffer into Connection objects."""
+    if count == 0:
+        return []
+    rows = (MIB_TCPROW_OWNER_PID * count).from_buffer(buffer, ctypes.sizeof(DWORD))
+    return [Connection(
+        protocol="TCP",
+        local_address=decode_ip(r.dwLocalAddr), local_port=decode_port(r.dwLocalPort),
+        remote_address=decode_ip(r.dwRemoteAddr), remote_port=decode_port(r.dwRemotePort),
+        state=_state(r.dwState, force_state),
+        pid=r.dwOwningPid, process_name=process_map.get(r.dwOwningPid, "Unknown"),
+        ip_version=4) for r in rows]
+
+
+def parse_tcp6(buffer, count, process_map, force_state=None):
+    """Turn a MIB_TCP6TABLE_OWNER_PID buffer into Connection objects."""
+    if count == 0:
+        return []
+    rows = (MIB_TCP6ROW_OWNER_PID * count).from_buffer(buffer, ctypes.sizeof(DWORD))
+    return [Connection(
+        protocol="TCP",
+        local_address=decode_ipv6(r.ucLocalAddr, r.dwLocalScopeId),
+        local_port=decode_port(r.dwLocalPort),
+        remote_address=decode_ipv6(r.ucRemoteAddr, r.dwRemoteScopeId),
+        remote_port=decode_port(r.dwRemotePort),
+        state=_state(r.dwState, force_state),
+        pid=r.dwOwningPid, process_name=process_map.get(r.dwOwningPid, "Unknown"),
+        ip_version=6) for r in rows]
+
 
 def get_tcp_connections(process_map):
-
-    size = wintypes.ULONG(0)
-
-    # ------------------------------------------
-    # First Call
-    # Get required buffer size
-    # ------------------------------------------
-
-    result = GetExtendedTcpTable(
-
-        None,
-        ctypes.byref(size),
-        False,
-        AF_INET,
-        TCP_TABLE_OWNER_PID_ALL,
-        0
-
-    )
-
-    if result != ERROR_INSUFFICIENT_BUFFER:
-        raise ctypes.WinError(result)
-
-    # ------------------------------------------
-    # Allocate Buffer
-    # ------------------------------------------
-
-    buffer = ctypes.create_string_buffer(size.value)
-
-    # ------------------------------------------
-    # Second Call
-    # Read Kernel TCP Table
-    # ------------------------------------------
-
-    result = GetExtendedTcpTable(
-
-        buffer,
-        ctypes.byref(size),
-        False,
-        AF_INET,
-        TCP_TABLE_OWNER_PID_ALL,
-        0
-
-    )
-
-    if result != NO_ERROR:
-        raise ctypes.WinError(result)
-
-    # ------------------------------------------
-    # Cast Buffer
-    # ------------------------------------------
-
-    table = ctypes.cast(
-        buffer,
-        ctypes.POINTER(MIB_TCPTABLE_OWNER_PID)
-    ).contents
-
-    num_entries = table.dwNumEntries
-
-    # ------------------------------------------
-    # Pointer to First Row
-    # ------------------------------------------
-
-    row_ptr = ctypes.cast(
-
-        ctypes.addressof(buffer)
-        + ctypes.sizeof(wintypes.DWORD),
-
-        ctypes.POINTER(MIB_TCPROW_OWNER_PID)
-
-    )
-
-    
+    """
+    Listeners come from the LISTENER table, everything else from the CONNECTIONS table.
+    Together they hold exactly the same rows as the ALL table, but the state of a listener
+    no longer depends on the raw dwState value (see LISTENER_RAW_ANOMALIES).
+    """
     connections = []
-
-    # Decode every TCP row
-    for i in range(num_entries):
-
-        row = row_ptr[i]
-
-        # 1. Decode local IP address
-        local_ip = socket.inet_ntoa(
-            struct.pack("<L", row.dwLocalAddr)
-        )
-
-        # 2. Decode remote IP address
-        remote_ip = socket.inet_ntoa(
-            struct.pack("<L", row.dwRemoteAddr)
-        )
-
-        # 3. Decode port numbers
-        local_port = socket.ntohs(
-            row.dwLocalPort & 0xFFFF
-        )
-
-        remote_port = socket.ntohs(
-            row.dwRemotePort & 0xFFFF
-        )
-
-        # 4. Convert numeric TCP state to readable text
-        state = TCP_STATES.get(
-            row.dwState,
-            "UNKNOWN"
-        )
-
-        # 5. Get process ID
-        pid = row.dwOwningPid
-
-        # 6. Find process name using PID
-        process_name = process_map.get(
-            pid,
-            "Unknown"
-        )
-
-        # 7. Create a Connection object
-        conn = Connection(
-            protocol="TCP",
-            local_address=local_ip,
-            local_port=local_port,
-            remote_address=remote_ip,
-            remote_port=remote_port,
-            state=state,
-            pid=pid,
-            process_name=process_name
-        )
-
-        # 8. Add this connection to the list
-        connections.append(conn)
-
-    # Return only after processing every row
+    for family, parse in ((AF_INET, parse_tcp4), (AF_INET6, parse_tcp6)):
+        try:
+            for table_class, force in ((TCP_TABLE_OWNER_PID_LISTENER, "LISTEN"),
+                                       (TCP_TABLE_OWNER_PID_CONNECTIONS, None)):
+                buffer, count = fetch_table(GetExtendedTcpTable, family, table_class)
+                connections += parse(buffer, count, process_map, force)
+        except OSError as e:
+            if family == AF_INET:
+                raise
+            print(f"[warn] IPv6 TCP table unavailable: {e}", file=sys.stderr)   # IPv6 may be disabled
     return connections
- 
-    # ------------------------------------------
-    # Decode Every Row
-    # ------------------------------------------
-
-    for i in range(num_entries):
-
-        row = row_ptr[i]
-
-        # Local IP Address
-        local_ip = socket.inet_ntoa(
-            struct.pack("<L", row.dwLocalAddr)
-        )
-
-        # Remote IP Address
-        remote_ip = socket.inet_ntoa(
-            struct.pack("<L", row.dwRemoteAddr)
-        )
-
-        # Convert Network Byte Order Port -> Host Order
-        local_port = socket.ntohs(row.dwLocalPort & 0xFFFF)
-        remote_port = socket.ntohs(row.dwRemotePort & 0xFFFF)
-
-        # TCP State
-        state = TCP_STATES.get(
-            row.dwState,
-            "UNKNOWN"
-        )
-
-        # PID
-        pid = row.dwOwningPid
-
-        # Process Name
-        process_name = process_map.get(
-            pid,
-            "Unknown"
-        )
-
-        # Create Connection Object
-        conn = Connection(
-
-            protocol="TCP",
-
-            local_address=local_ip,
-            local_port=local_port,
-
-            remote_address=remote_ip,
-            remote_port=remote_port,
-
-            state=state,
-
-            pid=pid,
-            process_name=process_name
-
-        )
-
-        connections.append(conn)
-
-    return connections
-
-
